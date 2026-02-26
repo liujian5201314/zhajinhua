@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微信炸金花</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game-container">
+        <h1>微信炸金花</h1>
+        
+        <div class="game-info" id="game-info">
+            <!-- 玩家信息会动态生成 -->
+        </div>
+        
+        <div class="cards-area" id="cards-area">
+            <!-- 玩家牌会动态生成 -->
+        </div>
+        
+        <div class="pot-area">
+            <h3>奖池: <span id="pot">0</span></h3>
+            <div class="current-bet">当前下注: <span id="current-bet">0</span></div>
+        </div>
+        
+        <div class="action-buttons">
+            <button id="bet-10">下注10</button>
+            <button id="bet-50">下注50</button>
+            <button id="bet-100">下注100</button>
+            <button id="check">过牌</button>
+            <button id="fold">弃牌</button>
+            <button id="compare">比牌</button>
+            <button id="restart">重新开始</button>
+        </div>
+        
+        <div class="game-message" id="game-message"></div>
+    </div>
+    
+    <script src="cards.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
