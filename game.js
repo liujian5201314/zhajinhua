@@ -1,12 +1,12 @@
 // Firebase配置
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_AUTH_DOMAIN",
-    databaseURL: "YOUR_DATABASE_URL",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_STORAGE_BUCKET",
-    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyB5ni-l335Oc4mJVIiRSsjNcWoJ4YyxQ0U",
+    authDomain: "zhajinhua-5e568.firebaseapp.com",
+    databaseURL: "https://zhajinhua-5e568-default-rtdb.firebaseio.com",
+    projectId: "zhajinhua-5e568",
+    storageBucket: "zhajinhua-5e568.firebasestorage.app",
+    messagingSenderId: "586482262446",
+    appId: "1:586482262446:web:ce190e2cc0bec994f2683f"
 };
 
 // 初始化Firebase
