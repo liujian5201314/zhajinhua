@@ -10,8 +10,15 @@ const firebaseConfig = {
 };
 
 // 初始化Firebase
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
+let database;
+try {
+    firebase.initializeApp(firebaseConfig);
+    database = firebase.database();
+    console.log('Firebase初始化成功');
+} catch (error) {
+    console.error('Firebase初始化失败:', error);
+    alert('Firebase初始化失败，请检查网络连接');
+}
 
 class Player {
     constructor(name, isAI = false) {
