@@ -5,22 +5,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>微信炸金花</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
 </head>
 <body>
-    <div class="game-container">
+    <!-- 房间管理界面 -->
+    <div class="room-container" id="room-container">
+        <h1>微信炸金花</h1>
+        <div class="room-actions">
+            <div class="create-room">
+                <h2>创建房间</h2>
+                <input type="text" id="room-name" placeholder="房间名称">
+                <input type="number" id="room-amount" placeholder="底注金额" min="10" max="1000">
+                <button id="create-room-btn">创建房间</button>
+            </div>
+            <div class="join-room">
+                <h2>加入房间</h2>
+                <input type="text" id="join-room-code" placeholder="房间代码">
+                <button id="join-room-btn">加入房间</button>
+            </div>
+        </div>
+        <div class="room-list" id="room-list">
+            <h2>房间列表</h2>
+            <div id="rooms-container"></div>
+        </div>
+    </div>
+    
+    <!-- 游戏界面 -->
+    <div class="game-container" id="game-container" style="display: none;">
         <h1>微信炸金花</h1>
         
-        <div class="game-info" id="game-info">
-            <!-- 玩家信息会动态生成 -->
+        <div class="room-info">
+            <div class="room-name" id="room-name-display"></div>
+            <div class="room-code" id="room-code-display"></div>
+            <button id="leave-room-btn">离开房间</button>
         </div>
         
-        <div class="cards-area" id="cards-area">
-            <!-- 玩家牌会动态生成 -->
+        <!-- 圆桌布局 -->
+        <div class="table-container">
+            <div class="poker-table">
+                <div class="player-seat seat-0" id="seat-0"></div>
+                <div class="player-seat seat-1" id="seat-1"></div>
+                <div class="player-seat seat-2" id="seat-2"></div>
+                <div class="player-seat seat-3" id="seat-3"></div>
+                <div class="table-center">
+                    <div class="pot-area">
+                        <h3>奖池: <span id="pot">0</span></h3>
+                        <div class="current-bet">当前下注: <span id="current-bet">0</span></div>
+                        <div class="base-bet">底注: <span id="base-bet">10</span></div>
+                    </div>
+                </div>
+            </div>
         </div>
         
-        <div class="pot-area">
-            <h3>奖池: <span id="pot">0</span></h3>
-            <div class="current-bet">当前下注: <span id="current-bet">0</span></div>
+        <!-- 玩家手牌 -->
+        <div class="player-hand-area">
+            <h3>你的牌</h3>
+            <div class="cards" id="player-cards"></div>
+            <div class="hand-type" id="player-hand-type"></div>
         </div>
         
         <div class="action-buttons">
@@ -30,7 +72,6 @@
             <button id="check">过牌</button>
             <button id="fold">弃牌</button>
             <button id="compare">比牌</button>
-            <button id="restart">重新开始</button>
         </div>
         
         <div class="game-message" id="game-message"></div>
