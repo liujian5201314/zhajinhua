@@ -41,7 +41,8 @@ try {
 let currentGame = null;
 
 class Player {
-    constructor(name, isAI = false) {
+    constructor(name, isAI = false, id = null) {
+        this.id = id || 'player_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
         this.name = name;
         this.isAI = isAI;
         this.chips = 1000;
@@ -75,6 +76,7 @@ class Player {
     
     toJSON() {
         return {
+            id: this.id,
             name: this.name,
             isAI: this.isAI,
             chips: this.chips,
@@ -87,7 +89,7 @@ class Player {
     }
     
     static fromJSON(data) {
-        const player = new Player(data.name, data.isAI);
+        const player = new Player(data.name, data.isAI, data.id);
         player.chips = data.chips;
         player.bet = data.bet;
         player.hand = data.hand.map(cardData => new Card(cardData.suit, cardData.rank));
@@ -319,9 +321,8 @@ class Game {
                 this.betTime = roomData.betTime || 30;
                 
                 const playerName = '玩家' + Math.floor(Math.random() * 1000);
-                const playerId = 'player_' + Date.now();
-                
                 this.currentPlayer = new Player(playerName);
+                const playerId = this.currentPlayer.id;
                 
                 const playerData = this.currentPlayer.toJSON();
                 database.ref('rooms/' + roomId + '/players/' + playerId).set(playerData).then(() => {
@@ -357,7 +358,7 @@ class Game {
                 this.players = Object.values(playersData).map(Player.fromJSON);
                 // 确保当前玩家对象在数组中
                 if (this.currentPlayer) {
-                    const currentPlayerExists = this.players.some(p => p.name === this.currentPlayer.name);
+                    const currentPlayerExists = this.players.some(p => p.id === this.currentPlayer.id);
                     if (!currentPlayerExists) {
                         this.players.push(this.currentPlayer);
                     }
@@ -416,27 +417,18 @@ class Game {
     
     leaveRoom() {
         if (this.roomId) {
-            if (database) {
+            if (database && this.currentPlayer) {
                 // Firebase模式
                 // 从房间中移除当前玩家
+                const playerId = this.currentPlayer.id;
+                database.ref('rooms/' + this.roomId + '/players/' + playerId).remove().catch((error) => {
+                    console.error('移除玩家失败:', error);
+                });
+                
+                // 检查房间是否为空，自动解散
                 database.ref('rooms/' + this.roomId + '/players').once('value', (snapshot) => {
                     const playersData = snapshot.val();
-                    if (playersData) {
-                        Object.keys(playersData).forEach(playerId => {
-                            if (playersData[playerId].name === this.currentPlayer.name) {
-                                database.ref('rooms/' + this.roomId + '/players/' + playerId).remove().catch((error) => {
-                                    console.error('移除玩家失败:', error);
-                                });
-                            }
-                        });
-                        
-                        // 如果房间为空，自动解散
-                        if (Object.keys(playersData).length === 1) { // 只有当前玩家一个
-                            database.ref('rooms/' + this.roomId).remove().catch((error) => {
-                                console.error('解散房间失败:', error);
-                            });
-                        }
-                    } else {
+                    if (!playersData || Object.keys(playersData).length === 0) {
                         // 房间为空，自动解散
                         database.ref('rooms/' + this.roomId).remove().catch((error) => {
                             console.error('解散房间失败:', error);
@@ -531,15 +523,11 @@ class Game {
                 console.error('保存游戏状态失败:', error);
             });
             
-            // 先清空现有玩家，然后重新添加所有玩家
-            database.ref('rooms/' + this.roomId + '/players').set({}).then(() => {
-                this.players.forEach((player, index) => {
-                    database.ref('rooms/' + this.roomId + '/players/player_' + index).set(player.toJSON()).catch((error) => {
-                        console.error('保存玩家数据失败:', error);
-                    });
+            // 更新每个玩家的数据，使用玩家ID作为键
+            this.players.forEach((player) => {
+                database.ref('rooms/' + this.roomId + '/players/' + player.id).update(player.toJSON()).catch((error) => {
+                    console.error('保存玩家数据失败:', error);
                 });
-            }).catch((error) => {
-                console.error('清空玩家数据失败:', error);
             });
         }
     }
