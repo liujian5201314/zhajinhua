@@ -221,6 +221,12 @@ class Game {
     loadRooms() {
         if (!this.elements.roomsContainer) return;
         
+        if (!database) {
+            console.error('Firebase未初始化');
+            this.elements.roomsContainer.innerHTML = '<div class="error-message">Firebase未初始化，请检查网络连接</div>';
+            return;
+        }
+        
         // Firebase模式
         database.ref('rooms').once('value', (snapshot) => {
             const rooms = snapshot.val();
@@ -244,11 +250,18 @@ class Game {
             }
         }).catch((error) => {
             console.error('加载房间列表失败:', error);
+            this.elements.roomsContainer.innerHTML = '<div class="error-message">加载房间列表失败，请重试</div>';
         });
     }
     
     createRoom() {
         if (!this.elements.roomNameInput || !this.elements.roomAmountInput) return;
+        
+        if (!database) {
+            console.error('Firebase未初始化');
+            alert('Firebase未初始化，请检查网络连接');
+            return;
+        }
         
         const roomName = this.elements.roomNameInput.value || '新房间';
         const baseBet = parseInt(this.elements.roomAmountInput.value) || 10;
@@ -290,6 +303,12 @@ class Game {
     }
     
     joinRoomWithCode(roomId) {
+        if (!database) {
+            console.error('Firebase未初始化');
+            alert('Firebase未初始化，请检查网络连接');
+            return;
+        }
+        
         // 只使用Firebase模式
         database.ref('rooms/' + roomId).once('value', (snapshot) => {
             const roomData = snapshot.val();
@@ -326,6 +345,11 @@ class Game {
     }
     
     setupRoomListeners() {
+        if (!database) {
+            console.error('Firebase未初始化');
+            return;
+        }
+        
         // Firebase模式监听器
         database.ref('rooms/' + this.roomId + '/players').on('value', (snapshot) => {
             const playersData = snapshot.val();
@@ -392,41 +416,43 @@ class Game {
     
     leaveRoom() {
         if (this.roomId) {
-            // Firebase模式
-            // 从房间中移除当前玩家
-            database.ref('rooms/' + this.roomId + '/players').once('value', (snapshot) => {
-                const playersData = snapshot.val();
-                if (playersData) {
-                    Object.keys(playersData).forEach(playerId => {
-                        if (playersData[playerId].name === this.currentPlayer.name) {
-                            database.ref('rooms/' + this.roomId + '/players/' + playerId).remove().catch((error) => {
-                                console.error('移除玩家失败:', error);
+            if (database) {
+                // Firebase模式
+                // 从房间中移除当前玩家
+                database.ref('rooms/' + this.roomId + '/players').once('value', (snapshot) => {
+                    const playersData = snapshot.val();
+                    if (playersData) {
+                        Object.keys(playersData).forEach(playerId => {
+                            if (playersData[playerId].name === this.currentPlayer.name) {
+                                database.ref('rooms/' + this.roomId + '/players/' + playerId).remove().catch((error) => {
+                                    console.error('移除玩家失败:', error);
+                                });
+                            }
+                        });
+                        
+                        // 如果房间为空，自动解散
+                        if (Object.keys(playersData).length === 1) { // 只有当前玩家一个
+                            database.ref('rooms/' + this.roomId).remove().catch((error) => {
+                                console.error('解散房间失败:', error);
                             });
                         }
-                    });
-                    
-                    // 如果房间为空，自动解散
-                    if (Object.keys(playersData).length === 1) { // 只有当前玩家一个
+                    } else {
+                        // 房间为空，自动解散
                         database.ref('rooms/' + this.roomId).remove().catch((error) => {
                             console.error('解散房间失败:', error);
                         });
                     }
-                } else {
-                    // 房间为空，自动解散
-                    database.ref('rooms/' + this.roomId).remove().catch((error) => {
-                        console.error('解散房间失败:', error);
-                    });
-                }
-            }).catch((error) => {
-                console.error('获取玩家信息失败:', error);
-            });
-            
-            // 移除监听器
-            database.ref('rooms/' + this.roomId + '/players').off();
-            database.ref('rooms/' + this.roomId + '/gameActive').off();
-            database.ref('rooms/' + this.roomId + '/pot').off();
-            database.ref('rooms/' + this.roomId + '/currentBet').off();
-            database.ref('rooms/' + this.roomId + '/currentPlayerIndex').off();
+                }).catch((error) => {
+                    console.error('获取玩家信息失败:', error);
+                });
+                
+                // 移除监听器
+                database.ref('rooms/' + this.roomId + '/players').off();
+                database.ref('rooms/' + this.roomId + '/gameActive').off();
+                database.ref('rooms/' + this.roomId + '/pot').off();
+                database.ref('rooms/' + this.roomId + '/currentBet').off();
+                database.ref('rooms/' + this.roomId + '/currentPlayerIndex').off();
+            }
             
             this.roomId = null;
             this.roomName = '';
@@ -442,6 +468,12 @@ class Game {
     }
     
     startGame() {
+        if (!database) {
+            console.error('Firebase未初始化');
+            alert('Firebase未初始化，请检查网络连接');
+            return;
+        }
+        
         // 只有房间创建者可以开始游戏
         if (!this.isRoomCreator) {
             this.updateMessage('只有房间创建者可以开始游戏');
@@ -486,7 +518,7 @@ class Game {
     }
     
     saveGameState() {
-        if (this.roomId) {
+        if (this.roomId && database) {
             const gameState = {
                 gameActive: this.gameActive,
                 pot: this.pot,
