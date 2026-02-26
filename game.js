@@ -10,15 +10,35 @@ const firebaseConfig = {
 };
 
 // 初始化Firebase
-let database;
+let database = null;
+let firebaseApp = null;
+let firebaseConnected = false;
+
 try {
-    firebase.initializeApp(firebaseConfig);
+    console.log('开始初始化Firebase...');
+    firebaseApp = firebase.initializeApp(firebaseConfig);
     database = firebase.database();
+    
+    // 监听Firebase连接状态
+    const connectedRef = database.ref('.info/connected');
+    connectedRef.on('value', (snapshot) => {
+        if (snapshot.val() === true) {
+            console.log('Firebase连接成功');
+            firebaseConnected = true;
+        } else {
+            console.log('Firebase连接断开');
+            firebaseConnected = false;
+        }
+    });
+    
     console.log('Firebase初始化成功');
 } catch (error) {
     console.error('Firebase初始化失败:', error);
-    alert('Firebase初始化失败，请检查网络连接');
+    alert('Firebase初始化失败，请检查网络连接或Firebase配置');
 }
+
+// 全局游戏实例
+let currentGame = null;
 
 class Player {
     constructor(name, isAI = false) {
@@ -85,12 +105,15 @@ class Game {
         this.pot = 0;
         this.currentBet = 0;
         this.baseBet = 10;
+        this.betTime = 30; // 默认下注时间30秒
+        this.turnTimer = null; // 回合计时器
         this.deck = null;
         this.gameActive = false;
         this.roomId = null;
         this.roomName = '';
         this.currentPlayer = null;
         this.turnCount = 0;
+        this.isRoomCreator = false; // 是否是房间创建者
         
         this.initializeElements();
         this.bindEvents();
@@ -104,6 +127,7 @@ class Game {
             gameContainer: document.getElementById('game-container'),
             roomNameInput: document.getElementById('room-name'),
             roomAmountInput: document.getElementById('room-amount'),
+            betTimeInput: document.getElementById('bet-time'),
             createRoomBtn: document.getElementById('create-room-btn'),
             joinRoomCodeInput: document.getElementById('join-room-code'),
             joinRoomBtn: document.getElementById('join-room-btn'),
@@ -111,6 +135,11 @@ class Game {
             roomNameDisplay: document.getElementById('room-name-display'),
             roomCodeDisplay: document.getElementById('room-code-display'),
             leaveRoomBtn: document.getElementById('leave-room-btn'),
+            startGameBtn: document.getElementById('start-game-btn'),
+            rulesBtn: document.getElementById('rules-btn'),
+            rulesBtnGame: document.getElementById('rules-btn-game'),
+            rulesModal: document.getElementById('rules-modal'),
+            closeModal: document.querySelector('.close'),
             
             // 游戏界面
             pot: document.getElementById('pot'),
@@ -124,23 +153,64 @@ class Game {
             bet100: document.getElementById('bet-100'),
             check: document.getElementById('check'),
             fold: document.getElementById('fold'),
-            compare: document.getElementById('compare')
+            compare: document.getElementById('compare'),
+            playerCount: document.getElementById('player-count'),
+            gameStatus: document.getElementById('game-status')
         };
     }
     
     bindEvents() {
         // 房间管理事件
-        this.elements.createRoomBtn.addEventListener('click', () => this.createRoom());
-        this.elements.joinRoomBtn.addEventListener('click', () => this.joinRoom());
-        this.elements.leaveRoomBtn.addEventListener('click', () => this.leaveRoom());
+        if (this.elements.createRoomBtn) {
+            this.elements.createRoomBtn.addEventListener('click', () => this.createRoom());
+        }
+        if (this.elements.joinRoomBtn) {
+            this.elements.joinRoomBtn.addEventListener('click', () => this.joinRoom());
+        }
+        if (this.elements.leaveRoomBtn) {
+            this.elements.leaveRoomBtn.addEventListener('click', () => this.leaveRoom());
+        }
+        if (this.elements.startGameBtn) {
+            this.elements.startGameBtn.addEventListener('click', () => this.startGame());
+        }
+        
+        // 游戏规则模态框事件
+        if (this.elements.rulesBtn) {
+            this.elements.rulesBtn.addEventListener('click', () => this.showRules());
+        }
+        if (this.elements.rulesBtnGame) {
+            this.elements.rulesBtnGame.addEventListener('click', () => this.showRules());
+        }
+        if (this.elements.closeModal) {
+            this.elements.closeModal.addEventListener('click', () => this.hideRules());
+        }
+        if (this.elements.rulesModal) {
+            this.elements.rulesModal.addEventListener('click', (event) => {
+                if (event.target === this.elements.rulesModal) {
+                    this.hideRules();
+                }
+            });
+        }
         
         // 游戏操作事件
-        this.elements.bet10.addEventListener('click', () => this.placeBet(10));
-        this.elements.bet50.addEventListener('click', () => this.placeBet(50));
-        this.elements.bet100.addEventListener('click', () => this.placeBet(100));
-        this.elements.check.addEventListener('click', () => this.check());
-        this.elements.fold.addEventListener('click', () => this.fold());
-        this.elements.compare.addEventListener('click', () => this.showdown());
+        if (this.elements.bet10) {
+            this.elements.bet10.addEventListener('click', () => this.placeBet(10));
+        }
+        if (this.elements.bet50) {
+            this.elements.bet50.addEventListener('click', () => this.placeBet(50));
+        }
+        if (this.elements.bet100) {
+            this.elements.bet100.addEventListener('click', () => this.placeBet(100));
+        }
+        if (this.elements.check) {
+            this.elements.check.addEventListener('click', () => this.check());
+        }
+        if (this.elements.fold) {
+            this.elements.fold.addEventListener('click', () => this.fold());
+        }
+        if (this.elements.compare) {
+            this.elements.compare.addEventListener('click', () => this.showdown());
+        }
     }
     
     initializeRoomSystem() {
@@ -149,6 +219,9 @@ class Game {
     }
     
     loadRooms() {
+        if (!this.elements.roomsContainer) return;
+        
+        // Firebase模式
         database.ref('rooms').once('value', (snapshot) => {
             const rooms = snapshot.val();
             this.elements.roomsContainer.innerHTML = '';
@@ -169,33 +242,47 @@ class Game {
                     }
                 });
             }
+        }).catch((error) => {
+            console.error('加载房间列表失败:', error);
         });
     }
     
     createRoom() {
+        if (!this.elements.roomNameInput || !this.elements.roomAmountInput) return;
+        
         const roomName = this.elements.roomNameInput.value || '新房间';
         const baseBet = parseInt(this.elements.roomAmountInput.value) || 10;
+        const betTime = parseInt(this.elements.betTimeInput.value) || 30;
         const roomId = this.generateRoomCode();
         
         this.roomId = roomId;
         this.roomName = roomName;
         this.baseBet = baseBet;
+        this.betTime = betTime;
+        this.isRoomCreator = true; // 设置为房间创建者
         
         const roomData = {
             id: roomId,
             name: roomName,
             baseBet: baseBet,
+            betTime: betTime,
             gameActive: false,
             players: {},
             created_at: firebase.database.ServerValue.TIMESTAMP
         };
         
+        // Firebase模式
         database.ref('rooms/' + roomId).set(roomData).then(() => {
             this.joinRoomWithCode(roomId);
+        }).catch((error) => {
+            console.error('创建房间失败:', error);
+            alert('创建房间失败，请重试');
         });
     }
     
     joinRoom() {
+        if (!this.elements.joinRoomCodeInput) return;
+        
         const roomCode = this.elements.joinRoomCodeInput.value.trim();
         if (roomCode) {
             this.joinRoomWithCode(roomCode);
@@ -203,12 +290,14 @@ class Game {
     }
     
     joinRoomWithCode(roomId) {
+        // 只使用Firebase模式
         database.ref('rooms/' + roomId).once('value', (snapshot) => {
             const roomData = snapshot.val();
             if (roomData) {
                 this.roomId = roomId;
                 this.roomName = roomData.name;
                 this.baseBet = roomData.baseBet;
+                this.betTime = roomData.betTime || 30;
                 
                 const playerName = '玩家' + Math.floor(Math.random() * 1000);
                 const playerId = 'player_' + Date.now();
@@ -217,18 +306,38 @@ class Game {
                 
                 const playerData = this.currentPlayer.toJSON();
                 database.ref('rooms/' + roomId + '/players/' + playerId).set(playerData).then(() => {
+                    // 初始化玩家数组
+                    this.players = [this.currentPlayer];
+                    this.assignSeats();
                     this.setupRoomListeners();
                     this.showGameInterface();
+                }).catch((error) => {
+                    console.error('添加玩家失败:', error);
+                    alert('加入房间失败，请重试');
                 });
+            } else {
+                console.error('房间不存在');
+                alert('房间不存在，请检查房间代码');
             }
+        }).catch((error) => {
+            console.error('获取房间信息失败:', error);
+            alert('获取房间信息失败，请检查网络连接');
         });
     }
     
     setupRoomListeners() {
+        // Firebase模式监听器
         database.ref('rooms/' + this.roomId + '/players').on('value', (snapshot) => {
             const playersData = snapshot.val();
             if (playersData) {
                 this.players = Object.values(playersData).map(Player.fromJSON);
+                // 确保当前玩家对象在数组中
+                if (this.currentPlayer) {
+                    const currentPlayerExists = this.players.some(p => p.name === this.currentPlayer.name);
+                    if (!currentPlayerExists) {
+                        this.players.push(this.currentPlayer);
+                    }
+                }
                 this.assignSeats();
                 this.updateUI();
             }
@@ -236,6 +345,7 @@ class Game {
         
         database.ref('rooms/' + this.roomId + '/gameActive').on('value', (snapshot) => {
             this.gameActive = snapshot.val() || false;
+            this.updateUI();
         });
         
         database.ref('rooms/' + this.roomId + '/pot').on('value', (snapshot) => {
@@ -247,6 +357,11 @@ class Game {
             this.currentBet = snapshot.val() || 0;
             this.updateUI();
         });
+        
+        database.ref('rooms/' + this.roomId + '/currentPlayerIndex').on('value', (snapshot) => {
+            this.currentPlayerIndex = snapshot.val() || 0;
+            this.updateUI();
+        });
     }
     
     assignSeats() {
@@ -256,11 +371,20 @@ class Game {
     }
     
     showGameInterface() {
+        if (!this.elements.roomContainer || !this.elements.gameContainer) return;
+        
         this.elements.roomContainer.style.display = 'none';
         this.elements.gameContainer.style.display = 'block';
-        this.elements.roomNameDisplay.textContent = this.roomName;
-        this.elements.roomCodeDisplay.textContent = '房间代码: ' + this.roomId;
-        this.elements.baseBet.textContent = this.baseBet;
+        
+        if (this.elements.roomNameDisplay) {
+            this.elements.roomNameDisplay.textContent = this.roomName;
+        }
+        if (this.elements.roomCodeDisplay) {
+            this.elements.roomCodeDisplay.textContent = '房间代码: ' + this.roomId;
+        }
+        if (this.elements.baseBet) {
+            this.elements.baseBet.textContent = this.baseBet;
+        }
         
         this.updateUI();
         this.updateMessage('等待其他玩家加入...');
@@ -268,32 +392,80 @@ class Game {
     
     leaveRoom() {
         if (this.roomId) {
+            // Firebase模式
+            // 从房间中移除当前玩家
+            database.ref('rooms/' + this.roomId + '/players').once('value', (snapshot) => {
+                const playersData = snapshot.val();
+                if (playersData) {
+                    Object.keys(playersData).forEach(playerId => {
+                        if (playersData[playerId].name === this.currentPlayer.name) {
+                            database.ref('rooms/' + this.roomId + '/players/' + playerId).remove().catch((error) => {
+                                console.error('移除玩家失败:', error);
+                            });
+                        }
+                    });
+                    
+                    // 如果房间为空，自动解散
+                    if (Object.keys(playersData).length === 1) { // 只有当前玩家一个
+                        database.ref('rooms/' + this.roomId).remove().catch((error) => {
+                            console.error('解散房间失败:', error);
+                        });
+                    }
+                } else {
+                    // 房间为空，自动解散
+                    database.ref('rooms/' + this.roomId).remove().catch((error) => {
+                        console.error('解散房间失败:', error);
+                    });
+                }
+            }).catch((error) => {
+                console.error('获取玩家信息失败:', error);
+            });
+            
+            // 移除监听器
             database.ref('rooms/' + this.roomId + '/players').off();
             database.ref('rooms/' + this.roomId + '/gameActive').off();
             database.ref('rooms/' + this.roomId + '/pot').off();
             database.ref('rooms/' + this.roomId + '/currentBet').off();
+            database.ref('rooms/' + this.roomId + '/currentPlayerIndex').off();
             
             this.roomId = null;
             this.roomName = '';
             this.players = [];
             this.gameActive = false;
+            this.isRoomCreator = false;
             
-            this.elements.gameContainer.style.display = 'none';
-            this.elements.roomContainer.style.display = 'block';
+            if (this.elements.gameContainer && this.elements.roomContainer) {
+                this.elements.gameContainer.style.display = 'none';
+                this.elements.roomContainer.style.display = 'block';
+            }
         }
     }
     
     startGame() {
+        // 只有房间创建者可以开始游戏
+        if (!this.isRoomCreator) {
+            this.updateMessage('只有房间创建者可以开始游戏');
+            return;
+        }
+        
+        // 检查是否有至少2名玩家
+        if (this.players.length < 2) {
+            this.updateMessage('房间中至少需要2名玩家才能开始游戏');
+            return;
+        }
+        
+        // 初始化牌局
         this.deck = new Deck();
         this.pot = 0;
         this.currentBet = this.baseBet;
         this.gameActive = true;
         
+        // 分配手牌并重置玩家状态
         this.players.forEach(player => {
             player.hand = this.deck.dealHand(3);
             player.resetBet();
             player.folded = false;
-            player.handVisible = false;
+            player.handVisible = true; // 所有玩家的牌对自己可见
         });
         
         // 打底
@@ -308,6 +480,9 @@ class Game {
         this.saveGameState();
         this.updateUI();
         this.updateMessage('游戏开始！请下注或过牌。');
+        
+        // 开始游戏回合
+        this.nextPlayer();
     }
     
     saveGameState() {
@@ -319,37 +494,61 @@ class Game {
                 currentPlayerIndex: this.currentPlayerIndex
             };
             
-            database.ref('rooms/' + this.roomId).update(gameState);
+            // Firebase模式
+            database.ref('rooms/' + this.roomId).update(gameState).catch((error) => {
+                console.error('保存游戏状态失败:', error);
+            });
             
-            this.players.forEach((player, index) => {
-                database.ref('rooms/' + this.roomId + '/players/player_' + index).set(player.toJSON());
+            // 先清空现有玩家，然后重新添加所有玩家
+            database.ref('rooms/' + this.roomId + '/players').set({}).then(() => {
+                this.players.forEach((player, index) => {
+                    database.ref('rooms/' + this.roomId + '/players/player_' + index).set(player.toJSON()).catch((error) => {
+                        console.error('保存玩家数据失败:', error);
+                    });
+                });
+            }).catch((error) => {
+                console.error('清空玩家数据失败:', error);
             });
         }
     }
     
     updateUI() {
-        this.elements.pot.textContent = this.pot;
-        this.elements.currentBet.textContent = this.currentBet;
+        if (this.elements.pot) {
+            this.elements.pot.textContent = this.pot;
+        }
+        if (this.elements.currentBet) {
+            this.elements.currentBet.textContent = this.currentBet;
+        }
+        
+        // 更新状态信息
+        if (this.elements.playerCount) {
+            this.elements.playerCount.textContent = this.players.length;
+        }
+        if (this.elements.gameStatus) {
+            this.elements.gameStatus.textContent = this.gameActive ? '游戏中' : '等待中';
+        }
         
         // 更新座位显示
         for (let i = 0; i < 4; i++) {
             const seatElement = document.getElementById('seat-' + i);
-            const player = this.players.find(p => p.seatIndex === i);
-            
-            if (player) {
-                seatElement.innerHTML = `
-                    <div class="seat-player-name">${player.name}</div>
-                    <div class="seat-player-chips">筹码: ${player.chips}</div>
-                    <div class="seat-player-bet">下注: ${player.bet}</div>
-                    <div class="seat-cards">
-                        ${player.hand.map(card => {
-                            const visible = player.handVisible || player === this.currentPlayer;
-                            return `<div class="seat-card ${visible ? card.getColor() : 'back'}">${visible ? card.rank : '?'}</div>`;
-                        }).join('')}
-                    </div>
-                `;
-            } else {
-                seatElement.innerHTML = '<div class="seat-player-name">空</div>';
+            if (seatElement) {
+                const player = this.players.find(p => p.seatIndex === i);
+                
+                if (player) {
+                    seatElement.innerHTML = `
+                        <div class="seat-player-name">${player.name}</div>
+                        <div class="seat-player-chips">筹码: ${player.chips}</div>
+                        <div class="seat-player-bet">下注: ${player.bet}</div>
+                        <div class="seat-cards">
+                            ${player.hand.map(card => {
+                                const visible = player.handVisible || player === this.currentPlayer;
+                                return `<div class="seat-card ${visible ? card.getColor() : 'back'}">${visible ? card.rank : '?'}</div>`;
+                            }).join('')}
+                        </div>
+                    `;
+                } else {
+                    seatElement.innerHTML = '<div class="seat-player-name">空</div>';
+                }
             }
         }
         
@@ -358,13 +557,29 @@ class Game {
         if (player) {
             this.renderCards(this.elements.playerCards, player.hand, true);
             const handEval = HandEvaluator.evaluate(player.hand);
-            this.elements.playerHandType.textContent = handEval.type;
+            if (this.elements.playerHandType) {
+                this.elements.playerHandType.textContent = handEval.type;
+            }
         }
         
         this.updateButtons();
     }
     
+    showRules() {
+        if (this.elements.rulesModal) {
+            this.elements.rulesModal.style.display = 'block';
+        }
+    }
+    
+    hideRules() {
+        if (this.elements.rulesModal) {
+            this.elements.rulesModal.style.display = 'none';
+        }
+    }
+    
     renderCards(container, hand, visible) {
+        if (!container) return;
+        
         container.innerHTML = '';
         hand.forEach(card => {
             const cardElement = document.createElement('div');
@@ -389,16 +604,30 @@ class Game {
         const player = this.players.find(p => p === this.currentPlayer);
         const canAct = this.gameActive && player && !player.folded && this.currentPlayerIndex === this.players.indexOf(player);
         
-        this.elements.bet10.disabled = !canAct || player.chips < 10;
-        this.elements.bet50.disabled = !canAct || player.chips < 50;
-        this.elements.bet100.disabled = !canAct || player.chips < 100;
-        this.elements.check.disabled = !canAct;
-        this.elements.fold.disabled = !canAct;
-        this.elements.compare.disabled = !canAct;
+        if (this.elements.bet10) {
+            this.elements.bet10.disabled = !canAct || player.chips < 10;
+        }
+        if (this.elements.bet50) {
+            this.elements.bet50.disabled = !canAct || player.chips < 50;
+        }
+        if (this.elements.bet100) {
+            this.elements.bet100.disabled = !canAct || player.chips < 100;
+        }
+        if (this.elements.check) {
+            this.elements.check.disabled = !canAct;
+        }
+        if (this.elements.fold) {
+            this.elements.fold.disabled = !canAct;
+        }
+        if (this.elements.compare) {
+            this.elements.compare.disabled = !canAct;
+        }
     }
     
     updateMessage(message) {
-        this.elements.gameMessage.textContent = message;
+        if (this.elements.gameMessage) {
+            this.elements.gameMessage.textContent = message;
+        }
     }
     
     placeBet(amount) {
@@ -440,6 +669,20 @@ class Game {
     }
     
     nextPlayer() {
+        // 清除之前的计时器
+        if (this.turnTimer) {
+            clearInterval(this.turnTimer);
+            this.turnTimer = null;
+        }
+        
+        // 检查游戏是否结束
+        const activePlayers = this.getActivePlayers();
+        if (activePlayers.length <= 1) {
+            this.checkGameEnd();
+            return;
+        }
+        
+        // 寻找下一个未弃牌的玩家
         do {
             this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
         } while (this.players[this.currentPlayerIndex].folded && this.getActivePlayers().length > 1);
@@ -447,54 +690,49 @@ class Game {
         this.saveGameState();
         
         const currentPlayer = this.players[this.currentPlayerIndex];
-        if (currentPlayer.isAI && this.gameActive) {
-            setTimeout(() => this.aiAction(), 1000);
-        }
-    }
-    
-    aiAction() {
-        const aiPlayer = this.players[this.currentPlayerIndex];
-        const handStrength = aiPlayer.getHandStrength();
-        const requiredBet = this.currentBet - aiPlayer.bet;
-        
-        if (handStrength >= 7) {
-            const betAmount = Math.min(100, aiPlayer.chips);
-            this.placeBet(betAmount);
-        } else if (handStrength >= 5) {
-            if (requiredBet <= 50 && aiPlayer.chips >= requiredBet) {
-                this.placeBet(requiredBet);
-            } else {
-                this.fold();
-            }
-        } else if (handStrength >= 3) {
-            if (requiredBet <= 10 && aiPlayer.chips >= requiredBet) {
-                this.placeBet(requiredBet);
-            } else {
-                this.fold();
-            }
-        } else {
-            this.fold();
+        if (currentPlayer && this.gameActive) {
+            // 为真实玩家设置下注计时器
+            this.updateMessage(`轮到 ${currentPlayer.name} 行动，剩余时间: ${this.betTime}秒`);
+            let timeLeft = this.betTime;
+            
+            this.turnTimer = setInterval(() => {
+                timeLeft--;
+                this.updateMessage(`轮到 ${currentPlayer.name} 行动，剩余时间: ${timeLeft}秒`);
+                
+                if (timeLeft <= 0) {
+                    clearInterval(this.turnTimer);
+                    this.turnTimer = null;
+                    this.updateMessage(`${currentPlayer.name} 超时，自动弃牌`);
+                    this.fold();
+                }
+            }, 1000);
         }
     }
     
     showdown() {
+        // 显示所有玩家的手牌
         this.players.forEach(player => {
             player.handVisible = true;
         });
         
         const activePlayers = this.getActivePlayers();
         if (activePlayers.length === 1) {
+            // 只有一名玩家未弃牌，直接获胜
             const winner = activePlayers[0];
             winner.chips += this.pot;
             this.saveGameState();
             this.updateUI();
             this.updateMessage(`${winner.name}获胜，赢得了 ${this.pot} 筹码！`);
-        } else {
+        } else if (activePlayers.length > 1) {
+            // 比较手牌确定获胜者
             const winner = this.determineWinner(activePlayers);
             winner.chips += this.pot;
             this.saveGameState();
             this.updateUI();
             this.updateMessage(`${winner.name}获胜，赢得了 ${this.pot} 筹码！`);
+        } else {
+            // 没有活跃玩家，游戏结束
+            this.updateMessage('没有活跃玩家，游戏结束');
         }
         
         this.gameActive = false;
